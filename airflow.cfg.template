@@ -1,0 +1,133 @@
+# airflow.cfg.template
+# ─────────────────────────────────────────────────────────────────────────────
+# Airflow configuration template
+# Rendered by setup.sh at deploy time
+# {{ PLACEHOLDER }} values are replaced with real values from SSM + env
+# ─────────────────────────────────────────────────────────────────────────────
+
+[core]
+# Home directory for all Airflow files
+airflow_home = {{ AIRFLOW_HOME }}
+
+# DAG folder — Airflow scans this every dag_dir_list_interval seconds
+dags_folder = {{ AIRFLOW_HOME }}/dags
+
+# Framework lives here — added to sys.path by dag_factory_loader.py
+# No need to configure here — handled in code
+
+# Executor — LocalExecutor for single-server setup
+# Switch to CeleryExecutor or KubernetesExecutor for distributed setup
+executor = LocalExecutor
+
+# Do not load example DAGs
+load_examples = False
+
+# Default timezone for all DAGs
+default_timezone = {{ TIMEZONE }}
+
+# Number of DAG file processor processes
+# 2 is sufficient for a single-server setup
+dag_file_processor_timeout = 120
+min_file_process_interval = 30
+dag_dir_list_interval = 30
+
+# Parallelism — max tasks running across all DAGs simultaneously
+parallelism = {{ PARALLELISM }}
+
+# Max tasks per DAG run
+max_active_tasks_per_dag = {{ MAX_ACTIVE_TASKS_PER_DAG }}
+
+# Max concurrent DAG runs per DAG
+max_active_runs_per_dag = 1
+
+[database]
+# PostgreSQL connection string
+# Rendered from SSM secrets at deploy time
+sql_alchemy_conn = postgresql+psycopg2://{{ DB_USER }}:{{ DB_PASSWORD }}@{{ DB_HOST }}:{{ DB_PORT }}/{{ DB_NAME }}
+
+# Connection pool settings
+sql_alchemy_pool_size = 5
+sql_alchemy_max_overflow = 10
+sql_alchemy_pool_recycle = 1800
+
+[webserver]
+# Public URL — used in alert emails and links
+base_url = http://{{ AIRFLOW_HOST }}:{{ AIRFLOW_PORT }}
+web_server_host = 0.0.0.0
+web_server_port = {{ AIRFLOW_PORT }}
+
+# Secret key for session signing — fetched from SSM
+secret_key = {{ AIRFLOW_SECRET_KEY }}
+
+# Workers
+workers = 4
+worker_class = sync
+
+# Session lifetime
+web_server_worker_timeout = 120
+
+# Expose configuration in the UI — disable in production
+expose_config = False
+
+[scheduler]
+# How often the scheduler checks for new DAG files
+dag_dir_list_interval = 30
+
+# Minimum seconds between processing same DAG file twice
+min_file_process_interval = 30
+
+# How many seconds a DAG file processor can run before being killed
+dag_file_processor_timeout = 120
+
+# Heartbeat interval
+scheduler_heartbeat_sec = 5
+
+# Number of threads the scheduler uses
+max_threads = 2
+
+[logging]
+# Local log storage
+base_log_folder = {{ DEPLOYMENTS_BASE }}/airflow/logs
+
+# Log format
+log_format = [%%(asctime)s] {%%(filename)s:%%(lineno)d} %%(levelname)s - %%(message)s
+simple_log_format = %%(asctime)s %%(levelname)s - %%(message)s
+
+# Log level
+logging_level = INFO
+
+# Rotate logs — keep 30 days
+log_filename_template = {{ "{{" }} ti.dag_id {{ "}}" }}/{{ "{{" }} ti.task_id {{ "}}" }}/{{ "{{" }} ts {{ "}}" }}/{{ "{{" }} try_number {{ "}}" }}.log
+
+# Remote logging — disabled by default
+# Enable and configure for production S3 log storage
+remote_logging = False
+# remote_base_log_folder = s3://{{ BUCKET_NAME }}/airflow/logs
+# remote_log_conn_id = aws_default
+
+[smtp]
+# Email alerts — configure if alerts.on_failure = true in airflow_job.yml
+smtp_host = {{ SMTP_HOST }}
+smtp_starttls = True
+smtp_ssl = False
+smtp_port = {{ SMTP_PORT }}
+smtp_mail_from = {{ SMTP_FROM }}
+# smtp_user = {{ SMTP_USER }}
+# smtp_password = {{ SMTP_PASSWORD }}
+
+[celery]
+# Only relevant if executor = CeleryExecutor
+# Left here for future distributed setup
+broker_url = redis://{{ REDIS_HOST }}:6379/0
+result_backend = db+postgresql://{{ DB_USER }}:{{ DB_PASSWORD }}@{{ DB_HOST }}:{{ DB_PORT }}/{{ DB_NAME }}
+
+[api]
+# REST API authentication
+auth_backends = airflow.api.auth.backend.basic_auth
+
+[metrics]
+# StatsD metrics — optional
+statsd_on = False
+# statsd_host = localhost
+# statsd_port = 8125
+# statsd_prefix = airflow
