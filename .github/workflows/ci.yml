@@ -1,0 +1,84 @@
+# scheduler/.github/worklows/ci.yml
+name: Scheduler framework CI
+
+# start github workflow
+on:
+  push:
+    branches:
+      - main
+      - release
+  workflow_dispatch:
+    inputs:
+      gitleaks_allow_failure:
+        description: "Allow gitleaks to fail (emergency only)"
+        required: false
+        type: boolean
+        default: false
+      semgrep_allow_failure:
+        description: "Allow semgrep to fail (emergency only)"
+        required: false
+        type: boolean
+        default: false
+      pip_audit_allow_failure:
+        description: "Allow pip-audit to fail (emergency only)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.worfklow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Security gate - release branch only
+  security:
+    name: security gate
+    if: github.ref == 'refs/heads/release'
+    uses: barlou/CICD/.github/workflows/_security.yml@develop
+
+    with: 
+      gitleaks_allow_failure: ${{ inputs.gitleaks_allow_failure || false }}
+      semgrep_allow_failure: ${{ inputs.semgrep_allow_failure || false }}
+      pip_audit_allow_failure: ${{ inputs.pip_audit_allow_failure || false }}
+    secrets: inherit 
+
+  # Tests - main branch only, before release
+  test:
+    name: Framework test
+    if: | 
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install \
+            apache-airflow==2.9.0 \
+            pyyaml \
+            croniter \
+            boto3 \
+            pytest \
+            --quiet
+      - name: Run tests
+        run: |
+          python3 -m framework.segment_resolver
+          if [ -d "tests" ]; then
+            pytest tests/ -v -tb=short
+          else
+            echo "No tests/ directory yet -skipping pytest"
+          fi
+  
+  # Release - main branch only
+  release:
+    name: Release - tag and changelog 
+    if: | 
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push'
+    uses: barlou/CICD/.github/workflows/_release.yml@main
+    with:
+      module: scheduler
+    secrets: inherit 
