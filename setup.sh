@@ -17,6 +17,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# Variable initialisation
 AIRFLOW_ID="${1:-airflow-prod-1}"
 ENVIRONMENT="${2:-production}"
 AIRFLOW_HOME="${AIRFLOW_HOME:-$HOME/airflow}"
