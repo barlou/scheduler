@@ -33,7 +33,8 @@ jobs:
   security:
     name: security gate
     if: github.ref == 'refs/heads/release'
-    uses: barlou/CICD/.github/workflows/_security.yml@main
+    uses: barlou/CICD/.github/workflows/_security.yml@develop
+
     with: 
       gitleaks_allow_failure: ${{ inputs.gitleaks_allow_failure || false }}
       semgrep_allow_failure: ${{ inputs.semgrep_allow_failure || false }}
