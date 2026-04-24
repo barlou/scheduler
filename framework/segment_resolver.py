@@ -316,6 +316,7 @@ if __name__ == "__main__":
             airflow_id="test_pipeline",
             dag_id="test_pipeline",
             schedule=schedule,
+            execution=ExecutionConfig(mode="local"),
             job=JobConfig(
                 module=module,
                 entry_point='src/main.py',
