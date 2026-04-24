@@ -363,7 +363,7 @@ if __name__ == "__main__":
         _make_local("data_database",       "0 3 * * *"),
     ])
     
-    print("\n" * "=" * 60)
+    print("\n" + "=" * 60)
     print("TEST 2 - instance on step 2 pulls step 1 onto INSTANCE-A")
     print("=" * 60)
     t2 = build_pipeline_segments([
@@ -372,7 +372,7 @@ if __name__ == "__main__":
         _make_local("step3", "0 3 * * *"),
     ])
     
-    print("\n" * "=" * 60)
+    print("\n" + "=" * 60)
     print("TEST 3 - 10 modules, cloud on 2 and 8")
     print("=" * 60)
     t3 = build_pipeline_segments([
