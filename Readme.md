@@ -1,7 +1,6 @@
 # Airflow Orchestration Framework
 
-![CI](https://github.com/barlou/scheduler/actions/
-workflows/ci.yml/badge.svg?branch=main)
+![CI](https://github.com/barlou/scheduler/actions/workflows/ci.yml/badge.svg?branch=main)
 ![Release](https://img.shields.io/github/v/release/barlou/scheduler)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -465,7 +464,11 @@ A framework update never breaks existing projects. Teams upgrade when ready, tes
 ---
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 *Built with Apache Airflow 2.9.0 — [Airflow documentation](https://airflow.apache.org/docs/)*
+=======
+*Built with Apache Airflow 2.9.0 — [Airflow documentation](https://airflow.apache.org/docs/)*
+>>>>>>> develop
 =======
 *Built with Apache Airflow 2.9.0 — [Airflow documentation](https://airflow.apache.org/docs/)*
 >>>>>>> develop
