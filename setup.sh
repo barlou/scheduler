@@ -13,7 +13,20 @@
 #
 # Env vars expected (set by deploy_env.sh before this script runs):
 #   SSM_PREFIX          e.g. /production/airflow
+#   SSM_REGION          e.g. eu-west-3                  (required if SECRETS_BACKEND=ssm)
 #   DEPLOYMENTS_BASE    e.g. /home/ubuntu/deployments
+#   SECRETS_BACKEND     ssm (default) | github          (required if SECRETS_BACKEND=ssm)
+#
+# Github backend - values injectes as env vars by _deploy.yml:
+#   AIRFLOW_DB_HOST, AIRFLOW_DB_PORT, AIRFLOW_DB_NAME, AIRFLOW_DB_USER,
+#   AIRFLOW_DB_PASSWORD, AIRFLOW_SECRET_KEY, AIRFLOW_ADMIN_PASSWORD,
+#   AIRFLOW_SMTP_HOST, AIRFLOW_SMTP_PORT, AIRFLOW_SMTP_FROM, AIRFLOW_REDIS_HOST,
+#
+# Design:
+#   - SECRETS_BACKEND selects the resolver (fetch_secret dispatcher)
+#   - All callers use fetch_secret() — they don't know which backend runs
+#   - Adding a new backend (e.g, azure-keyvault) only required adding a case
+#     block to fetch_secret() and writing it in _deploy.yml
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -29,6 +42,9 @@ MAX_ACTIVE_TASKS="${MAX_ACTIVE_TASKS:-4}"
 AIRFLOW_VERSION="2.9.0"
 PYTHON_BIN="python3"
 
+# Secrets backend — ssm is the default to keep backward compatibility 
+SECRETS_BACKEND="${SECRETS_BACKENND:-ssm}"
+
 LOG_FILE="$DEPLOYMENTS_BASE/airflow/logs/setup.log"
 mkdir -p "$DEPLOYMENTS_BASE/airflow/logs"
 
@@ -36,26 +52,86 @@ mkdir -p "$DEPLOYMENTS_BASE/airflow/logs"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=== Airflow setup starting ==="
-echo "  Airflow ID   : $AIRFLOW_ID"
-echo "  Environment  : $ENVIRONMENT"
-echo "  Airflow home : $AIRFLOW_HOME"
-echo "  Deployments  : $DEPLOYMENTS_BASE"
-echo "  Port         : $AIRFLOW_PORT"
+echo "  Airflow ID      : $AIRFLOW_ID"
+echo "  Environment     : $ENVIRONMENT"
+echo "  Airflow home    : $AIRFLOW_HOME"
+echo "  Deployments     : $DEPLOYMENTS_BASE"
+echo "  Port            : $AIRFLOW_PORT"
+echo "  Secrets backend : $SECRETS_BACKEND"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-fetch_ssm() {
-    local param="$1"
-    local default="${2:-}"
-    local value
-    value=$(aws ssm get-parameter \
-        --name "$param" \
-        --with-decryption \
-        --query "Parameter.Value" \
-        --output text 2>/dev/null) || value="$default"
-    echo "$value"
+# fetch_secret <smm_path_suffix> <env_var_name> [default value]
+#
+# Resolves a single secret regardless of the backend in use
+#
+# - ssm backend    : calls AWS SSM using the suffix under $SSM_PREFIX
+# - github backend : reads the value from an env var already present in the 
+#                    process environment (injected by _deploy.yml secrets block)
+# - env backend    : reads from the same env var — useful for local dev/testing 
+#                    via a sourced .env file 
+#
+# Args:
+#   $1  SSM suffix      e.g, "db/host"        -> /$SSM_REFIX/db/host
+#   $2  Env var name    e.g, "AIRFLOW_B_HOST" -> read from $AIRFLOW_DB_HOST
+#   $3  Default value   (optional, empty string by default)
+#
+# Returns the resolved value on stdout. Exits 1 if the value is empty and no 
+# default aws provided (backend=ssm) or the env var is missing (backend=github)
+
+fetch_secret() {
+    local ssm_suffix="$1"
+    local env_var_name="${2}"
+    local default="${3:-}"
+    local value= ""
+
+    case "${SECRETS_BACKEND}" in 
+
+        # —— AWS SSM 
+        ssm)
+            local full_path="${SSM_PREFIX}/${ssm_suffix}"
+            value=$(aws ssm get-parameter \
+                --name            "$full_path" \
+                --with-decryption \
+                --region          "${SSM_REGION:-eu-west-3}" \
+                --query           "Parameter.Value" \
+                --output          text \
+                2>/dev/null) || value="$default"
+            if [[ -z "$value" && -z "$default" ]]; then
+                echo "::error::SSM parameter missing or empty; $full_path" >&2
+                echo "  Run: python3 ssm_preflight.py --env $ENVIRONMENT" >&2
+                exit 1
+            fi
+            ;;
+        # —— Github Actions Secrets
+        github)
+            value="${!env_var_name:-}"
+
+            if [[ -z "$value" && -z "$default" ]]; then 
+                echo "::error::Github secret env var not set: $env_var_name" >&2
+                echo "  Add it to your workflow secrets and map it in _deploy.yml" >&2
+                exit 1
+            fi
+            value="${value:-$default}"
+            ;;
+        # —— local .env fallback
+        env)
+            value="${!env_var_name:-$default}"
+            if [[ -z "$value" && -z "$default" ]]; then
+                echo "::error::Env var not set: $env_var_name (backend=env)" >&2
+                echo "  Make sure you sourced your .env file before calling setup.sh"
+                exit 1
+            fi
+            ;;
+        *)
+            echo "::error::Unknown SECRETS_BACKEND: '$SECRETS_NACKEND'" >&2
+            echo "  Supported: ssm | github | env" >&2
+            exit 1
+            ;;
+    esac
+        printf '%s' "$value"
 }
 
 service_running() {
@@ -107,21 +183,21 @@ echo "  [OK] directories created"
 # STEP 3 — Fetch secrets from SSM
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
-echo "--- Step 3: Fetch secrets from SSM ($SSM_PREFIX) ---"
+echo "--- Step 3: Fetch secrets [backend: $SECRETS_BACKEND] ---"
 
-DB_HOST=$(fetch_ssm    "$SSM_PREFIX/db/host")
-DB_PORT=$(fetch_ssm    "$SSM_PREFIX/db/port"     "5432")
-DB_NAME=$(fetch_ssm    "$SSM_PREFIX/db/name")
-DB_USER=$(fetch_ssm    "$SSM_PREFIX/db/user")
-DB_PASSWORD=$(fetch_ssm "$SSM_PREFIX/db/password")
+DB_HOST=$(fetch_secret    "/db/host"    "AIRFLOW_DB_HOST")
+DB_PORT=$(fetch_secret    "/db/port"    "AIRFLOW_DB_PORT"    "5432")
+DB_NAME=$(fetch_secret    "/db/name"    "AIRFLOW_DB_NAME")
+DB_USER=$(fetch_secret    "/db/user"    "AIRFLOW_DB_USER")
+DB_PASSWORD=$(fetch_secret "/db/password"   "AIRFLOW_DB_PASSWORD")
 
-AIRFLOW_SECRET_KEY=$(fetch_ssm "$SSM_PREFIX/secret_key")
+AIRFLOW_SECRET_KEY=$(fetch_secret "/secret_key" "AIRFLOW_SECRET_KEY")
 
-SMTP_HOST=$(fetch_ssm  "$SSM_PREFIX/smtp/host"   "localhost")
-SMTP_PORT=$(fetch_ssm  "$SSM_PREFIX/smtp/port"   "587")
-SMTP_FROM=$(fetch_ssm  "$SSM_PREFIX/smtp/from"   "airflow@localhost")
+SMTP_HOST=$(fetch_secret  "/smtp/host"  "AIRFLOW_SMTP_HOST"   "localhost")
+SMTP_PORT=$(fetch_secret  "/smtp/port"  "AIRFLOW_SMTP_PORT"   "587")
+SMTP_FROM=$(fetch_secret  "/smtp/from"  "AIRFLOW_SMTP_FROM"   "airflow@localhost")
 
-REDIS_HOST=$(fetch_ssm "$SSM_PREFIX/redis/host"  "localhost")
+REDIS_HOST=$(fetch_secret "/redis/host" "AIRFLOW_REDIS_HOST"  "localhost")
 
 # Fetch public hostname from EC2 metadata (IMDSv2)
 TOKEN=$(curl -s -X PUT \
