@@ -463,12 +463,4 @@ A framework update never breaks existing projects. Teams upgrade when ready, tes
 
 ---
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 *Built with Apache Airflow 2.9.0 — [Airflow documentation](https://airflow.apache.org/docs/)*
-=======
-*Built with Apache Airflow 2.9.0 — [Airflow documentation](https://airflow.apache.org/docs/)*
->>>>>>> develop
-=======
-*Built with Apache Airflow 2.9.0 — [Airflow documentation](https://airflow.apache.org/docs/)*
->>>>>>> develop
