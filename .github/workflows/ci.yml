@@ -1,4 +1,19 @@
 # scheduler/.github/worklows/ci.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Scheduler CI — security gate, tests, release, and optional deploy.
+#
+# Secrets backend selection:
+#   secrets_backend: ssm     (default) — pull from AWS SSM at deploy time
+#   secrets_backend: github  — inject GitHub Secrets as env vars via deploy_env.sh
+#
+# When using the github backend, add these repository secrets:
+#   AIRFLOW_DB_HOST, AIRFLOW_DB_PORT, AIRFLOW_DB_NAME, AIRFLOW_DB_USER,
+#   AIRFLOW_DB_PASSWORD, AIRFLOW_SECRET_KEY, AIRFLOW_ADMIN_PASSWORD,
+#   AIRFLOW_SMTP_HOST, AIRFLOW_SMTP_PORT, AIRFLOW_SMTP_FROM, AIRFLOW_REDIS_HOST
+#
+# When using the ssm backend, add:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY  (or use IAM instance role)
+# ─────────────────────────────────────────────────────────────────────────────
 name: Scheduler framework CI
 
 # start github workflow
@@ -24,6 +39,13 @@ on:
         required: false
         type: boolean
         default: false
+      # —— Deploy overrides (workflow_dispatch only)
+      secrets_backend:
+        description: "Secrets backend: ssm | github"
+        required: false
+        type: choice
+        options: ["ssm", "github"]
+        default: "ssm"
 
 concurrency:
   group: ${{ github.worfklow }}-${{ github.ref }}
