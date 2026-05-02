@@ -4,12 +4,12 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from pytz import timezone as ZoneInfo
 
 from airflow import DAG
-from airflow.operator.python import PythonOperator
+from airflow.operators.python import PythonOperator
 
-from framework.config_loader import AirflowConfigJob, scan_job_configs
+from framework.config_loader import AirflowJobConfig, scan_job_configs
 from framework.executors.base_executor import BaseExecutor, TaskResult
 from framework.segment_resolver import (
     ExecutionSegment,
@@ -88,7 +88,7 @@ def _pipeline_summary(
         for r in failed_steps:
             print(f"    ❌ {r.module}: {r.error}")
     
-    print(f"{"=" * 60}")
+    print(f"{'=' * 60}")
     
 # ─────────────────────────────────────────────────────────────────────────────
 # DAG builder — one pipeline
