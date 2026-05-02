@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 
 ---
+## [scheduler-v1.2.2] - 2026-05-02
+
+## scheduler v1.2.2
+
+> **Bump type:** Patch - bug fix
+> **Previous version:** scheduler-v1.2.1
+
+### Fixes
+- fix: airflow env configuration ([`d18ea49`](../../commit/d18ea49)) - Louis Barillon
+
+
+---
+---
 ## [scheduler-v1.2.1] - 2026-05-02
 
 ## scheduler v1.2.1
