@@ -107,9 +107,9 @@ def _run_cloud_step(
         entry_point (str): relative script path
         config_path (str): relative config path
         dag_id (str): pipeline DAG ID
-        server_config (dict): dict representation of ServiceConfig (passed as dict -
+        server_config (dict): dict representation of ServerConfig (passed as dict -
             ServerConfig is not XCom-serializable)
-        **context: Airflow task content
+        **context: Airflow task context
 
     Returns:
         dict: TaskResult.to_dict()
@@ -127,7 +127,7 @@ def _run_cloud_step(
     instance_data = ti.xcom_pull(key="active_instance")
     if not instance_data:
         raise RuntimeError(
-            f"  [cloud] No active instance found in XCom for module '{module}'"
+            f"  [cloud] No active instance found in XCom for module '{module}'. "
             f"Segment setup task may have failed."
         )
     
@@ -136,7 +136,7 @@ def _run_cloud_step(
     print(
         f"\n[cloud] Starting step\n"
         f"  DAG      : {dag_id}\n"
-        f"  Module.  : {module}\n"
+        f"  Module   : {module}\n"
         f"  Instance : {instance}\n"
         f"  Provider : {cfg.provider}\n"
         f"  Script   : {entry_point}\n"
@@ -350,123 +350,126 @@ class CloudExecutor(BaseExecutor):
         prev_instance:    ServerInstance from previous segment if any
     """
 
-def __init__(
-    self,
-    segment: ExecutionSegment,
-    is_first_cloud: bool = True,
-    prev_instance: ServerInstance | None = None,
-):
-    super().__init__(segment)
-    self.is_first_cloud = is_first_cloud
-    self.prev_instance = prev_instance
-    
-def build_tasks(
-    self, 
-    dag: DAG,
-    upstream_task: PythonOperator | None = None,
-) -> PythonOperator:
-    """
-    Build setup -> steps -> teardown task chain for this segment
+    def __init__(
+        self,
+        segment: ExecutionSegment,
+        is_first_cloud: bool = True,
+        prev_instance: ServerInstance | None = None,
+    ):
+        super().__init__(segment)
+        self.is_first_cloud = is_first_cloud
+        self.prev_instance = prev_instance
+        
+    def build_tasks(
+        self, 
+        dag: DAG,
+        upstream_task: PythonOperator | None = None,
+    ) -> PythonOperator:
+        """
+        Build setup -> steps -> teardown task chain for this segment
 
-    Args:
-        dag (DAG): Dag to attach tasks to
-        upstream_task (PythonOperator | None, optional): last task of previous segment. Defaults to None.
+        Args:
+            dag (DAG): Dag to attach tasks to
+            upstream_task (PythonOperator | None, optional): last task of previous segment. Defaults to None.
 
-    Returns:
-        PythonOperator: teardown task - used to chain next segment 
-    """
-    self._log_segment_summary()
-    
-    server_config = self._server_config_as_dict()
-    prev_data = vars(self.prev_instance) if self.prev_instance else None
-    
-    # Setup task
-    setup_task = self._make_python_task(
-        dag = dag,
-        task_id = self._segment_task_id("setup"),
-        callable = _setup_segment,
-        op_kwargs = {
-            "server_config" : server_config,
-            "prev_instance_data" : prev_data,
-            "is_first_cloud" : self.is_first_cloud,
-            "dag_id" : self.segment.steps[0].dag_id,
-        },
-        step = self.segment.steps[0]
-    )
-    
-    # Connect to previous segment 
-    if upstream_task is not None:
-        setup_task.set_upstream(upstream_task)
-    
-    # Step tasks
-    step_tasks: list[PythonOperator] = []
-    
-    for step in self.segment.steps:
-        task = self._make_python_task(
-            dag =     dag,
-            task_id = self._task_id(step),
-            callable = _run_cloud_step,
+        Returns:
+            PythonOperator: teardown task - used to chain next segment 
+        """
+        self._log_segment_summary()
+        
+        server_config = self._server_config_as_dict()
+        prev_data = vars(self.prev_instance) if self.prev_instance else None
+        
+        # Setup task
+        setup_task = self._make_python_task(
+            dag = dag,
+            task_id = self._segment_task_id("setup"),
+            python_callable = _setup_segment,
             op_kwargs = {
-                "module" : step.job.module,
-                "entry_point" : step.job.entry_point,
-                "config_path" : step.job.config_path,
-                "dag_id" : step.dag_id,
                 "server_config" : server_config,
+                "prev_instance_data" : prev_data,
+                "is_first_cloud" : self.is_first_cloud,
+                "dag_id" : self.segment.steps[0].dag_id,
             },
-            step = step,
+            step = self.segment.steps[0]
         )
-        step_tasks.append(task)
-    
-    # Chain setup -> step_1 -> step_2 -> ... -> step_N
-    self._chain_tasks(step_tasks, upstream_task=setup_task)
-    
-    # Teardown task
-    teardown_task = self._make_python_task(
-        dag = dag,
-        task_id = self._segment_task_id("teardown"),
-        callable = _teardown_segment,
-        op_kwargs = {
-            "server_config": server_config, 
-            "force": self.segment.force_terminate,
-            "is_last": self.segment.is_last,
-            "dag_id": self.segment.steps[0].dag_id,
-        },
-        step = self.segment.steps[-1],
-    )
-    
-    # Chain last step -> teardown 
-    teardown_task.set_upstream(step_tasks[-1])
-    
-    return teardown_task
+        
+        # Connect to previous segment 
+        if upstream_task is not None:
+            setup_task.set_upstream(upstream_task)
+        
+        # Step tasks
+        step_tasks: list[PythonOperator] = []
+        
+        for step in self.segment.steps:
+            task = self._make_python_task(
+                dag =     dag,
+                task_id = self._task_id(step),
+                python_callable = _run_cloud_step,
+                op_kwargs = {
+                    "module" : step.job.module,
+                    "entry_point" : step.job.entry_point,
+                    "config_path" : step.job.config_path,
+                    "dag_id" : step.dag_id,
+                    "server_config" : server_config,
+                },
+                step = step,
+            )
+            step_tasks.append(task)
+        
+        # Chain setup -> step_1 -> step_2 -> ... -> step_N
+        self._chain_tasks(step_tasks, upstream_task=setup_task)
+        
+        # Teardown task
+        teardown_task = self._make_python_task(
+            dag = dag,
+            task_id = self._segment_task_id("teardown"),
+            python_callable = _teardown_segment,
+            op_kwargs = {
+                "server_config": server_config, 
+                "force": self.segment.force_terminate,
+                "is_last": self.segment.is_last,
+                "dag_id": self.segment.steps[0].dag_id,
+            },
+            step = self.segment.steps[-1],
+        )
+        
+        # Chain last step -> teardown 
+        if step_tasks:
+            teardown_task.set_upstream(step_tasks[-1])
+        else:
+            teardown_task.set_upstream(step_tasks)
+        
+        return teardown_task
 
-# Private 
-def _server_config_as_dict(self) -> dict:
-    """
-    Convert ServerConfig to a plain dict for XCom and op_kwargs.
-    ServerConfig dataclass is not directly XCom-serializable
-    """
-    cfg = self.segment.server
-    return {
-        "provider":                cfg.provider,
-        "instance_type":           cfg.instance_type, 
-        "region":                  cfg.region, 
-        "ami_id":                  cfg.ami_id,
-        "subnet_id":               cfg.subnet_id,
-        "security_group_id":       cfg.security_group_id,
-        "iam_instance_profile":    cfg.iam_instance_profile,
-        "startup_timeout_minutes": cfg.startup_timeout_minutes,
-        "force_terminate":         cfg.force_terminate,
-    }
+    # Private 
+    def _server_config_as_dict(self) -> dict:
+        """
+        Convert ServerConfig to a plain dict for XCom and op_kwargs.
+        ServerConfig dataclass is not directly XCom-serializable
+        """
+        cfg = self.segment.server
+        return {
+            "provider":                cfg.provider,
+            "instance_type":           cfg.instance_type, 
+            "region":                  cfg.region, 
+            "ami_id":                  cfg.ami_id,
+            "subnet_id":               cfg.subnet_id,
+            "security_group_id":       cfg.security_group_id,
+            "iam_instance_profile":    cfg.iam_instance_profile,
+            "startup_timeout_minutes": cfg.startup_timeout_minutes,
+            "force_terminate":         cfg.force_terminate,
+        }
 
-def _segment_task_id(self, role: str) -> str:
-    """
-    Generate task ID for setup/teardown tasks.
-    Format: segment_{provider}_{instance_type}__{role}
-    e.g.:   segment_aws_t3large__setup
-    """
-    cfg = self.segment.server
-    base = (
-        f"segment_{cfg.provider}_"
-        f"{cfg.instance_type.replace('.', '').replace('-', '_')}"
-    )
-    return f"{base}__{role}"
+    def _segment_task_id(self, role: str) -> str:
+        """
+        Generate task ID for setup/teardown tasks.
+        Format: segment_{provider}_{instance_type}__{role}
+        e.g.:   segment_aws_t3large__setup
+        """
+        cfg = self.segment.server
+        base = (
+            f"segment_{cfg.provider}_"
+            f"{cfg.instance_type.replace('.', '').replace('-', '_')}"
+        )
+        return f"{base}__{role}"

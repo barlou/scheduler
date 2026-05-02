@@ -30,6 +30,7 @@ while [[ $# -gt 0 ]]; do
         --subnet-id)         SUBNET_ID="$2";         shift 2 ;;
         --security-group-id) SECURITY_GROUP_ID="$2"; shift 2 ;;
         --iam-profile)       IAM_PROFILE="$2";       shift 2 ;;
+        --region)            REGION="$2";            shift 2 ;;
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
@@ -42,22 +43,21 @@ for var in INSTANCE_TYPE AMI_ID SUBNET_ID SECURITY_GROUP_ID IAM_PROFILE; do
     fi
 done
 
-echo "Launching EC2 instances..."
+echo "Launching EC2 instance..."
 echo "  Type:   $INSTANCE_TYPE"
 echo "  AMI:    $AMI_ID"
 echo "  Region: $REGION"
 
 INSTANCE_ID=$(aws ec2 run-instances \
-    --region        "$REGION" \
-    --image-id      "$AMI_ID" \
-    --instance-type "$INSTANCE_TYPE" \
-    --subnet-id     "$SUBNET_ID" \
+    --region             "$REGION" \
+    --image-id           "$AMI_ID" \
+    --instance-type      "$INSTANCE_TYPE" \
+    --subnet-id          "$SUBNET_ID" \
     --security-group-ids "$SECURITY_GROUP_ID" \
     --iam-instance-profile Name="$IAM_PROFILE" \
     --tag-specification \
         "ResourceType=instance,Tags=[{Key=ManagedBy,Value=airflow-framework}]" \
-    --metadata-options \ 
-        "HttpTokens=required, HttpEndpoint=enabled" \
+    --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
     --query "Instances[0].InstanceId" \
     --output text)
 

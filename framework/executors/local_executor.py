@@ -1,7 +1,6 @@
 # framework/executors/local_executor.py
 from __future__ import annotations
 
-from multiprocessing import context
 import time
 
 from airflow import DAG
@@ -43,7 +42,7 @@ def _run_local_step(
     Returns:
         dict: _description_
     """
-    ti: object = context.get("ti")
+    ti = context.get("ti")
     print(
         f"\n[local] Starting step\n"
         f"  DAG: {dag_id}\n"
@@ -54,8 +53,6 @@ def _run_local_step(
     
     start = time.monotonic()
     manager = VenvManager(module)
-    error = ""
-    output = ""
     
     try:
         manager.create()
@@ -140,6 +137,12 @@ class LocalExecutor(BaseExecutor):
             task = self._build_step_task(dag, step)
             tasks.append(task)
         
+        if not tasks:
+                raise ValueError(
+                    f"LocalExecutor segment has no steps — "
+                    f"segment_resolver should never produce an empty segment"
+                )
+                
         self._chain_tasks(tasks, upstream_task)
         
         return tasks[-1]
@@ -165,7 +168,7 @@ class LocalExecutor(BaseExecutor):
         return self._make_python_task(
             dag=    dag,
             task_id= task_id,
-            callable= _run_local_step,
+            python_callable= _run_local_step,
             op_kwargs={
                 "module":      step.job.module,
                 "entry_point": step.job.entry_point,

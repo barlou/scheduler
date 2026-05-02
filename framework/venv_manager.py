@@ -31,7 +31,7 @@ class VenvManager:
     """
     
     def __init__(self, module: str, deployment_base: Path = DEPLOYMENTS):
-        self.module     = module
+        self.module          = module
         self.deployment_base = deployment_base
         self.venv_path       = VENV_BASE_DIR / f"{VENV_PREFIX}{module}"
         self.module_dir      = deployment_base / module
@@ -90,7 +90,7 @@ class VenvManager:
         extra_env:   dict[str, str] | None = None,
     ) -> None:
         """
-        Run the module(s entry point inside the venv.)
+        Run the modules entry point inside the venv.)
 
         Args:
             entry_point (str): relative path to the script, e.g, src/main.py
@@ -117,7 +117,7 @@ class VenvManager:
         
         if extra_env:
             env.update(extra_env)
-        print(f"    [venv] runnning: {script} --config {config}")
+        print(f"    [venv] running: {script} --config {config}")
         self._run_command(
             [
                 str(self.python),
@@ -151,7 +151,7 @@ class VenvManager:
     ) -> None:
         """
         Full lifecycle: create -> install -> run -> cleanup
-        Cleanup always run even if run() raises an execution
+        Cleanup always run even if run() raises an exception
 
         Args:
             entry_point (str): relative path to the script
@@ -206,13 +206,13 @@ class VenvManager:
             
             # Install dependencies 
             f"{pip} install --requirement {requirements} --quiet --no-cache-dir",
-            
-            # Run the module
-            f"cd {module_dir} && "
-            f"PYTHONPATH={module_dir} "
-            f"MODULE_DIR={module_dir} "
-            f"{python} {script} --config {config}",
-            
+            (
+                # Run the module
+                f"cd {module_dir} && "
+                f"PYTHONPATH={module_dir} "
+                f"MODULE_DIR={module_dir} "
+                f"{python} {script} --config {config}"
+            ),
             "Cleanup venv"
             f"rm -rf {venv}",
         ]

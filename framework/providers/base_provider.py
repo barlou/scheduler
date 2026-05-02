@@ -1,4 +1,4 @@
-# framwork/providers/base_provider.py
+# framework/providers/base_provider.py
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -100,8 +100,8 @@ class BaseProvider(ABC):
             ServerInstance: same ServerInstance with is_ready=True and IPs populated
             
         Raises:
-            TimeoutError: if instance doesn't become ready with config.startup_timeout_minutes
-            RuntimeError: if instance enters a failed state
+            TimeoutError: if instance doesn't become ready within config.startup_timeout_minutes
+            RunTimeError: if instance enters a failed state
         """
         ...
         
@@ -124,7 +124,7 @@ class BaseProvider(ABC):
             str: Combined stdout output from all commands
             
         Raises:
-            RuntimeError: if any command exits non-zero
+            RunTimeError: if any command exits non-zero
             ValueError:   if instance.is_ready is False
         """
         ...
@@ -139,7 +139,7 @@ class BaseProvider(ABC):
             instance (ServerInstance): ServerInstance to terminate
         
         Raises:
-            RuntimeError: if termination fails after retries.
+            RunTimeError: if termination fails after retries.
         """
         ...
         
@@ -154,7 +154,7 @@ class BaseProvider(ABC):
             ServerInstance: ready ServerInstance
         """
         print(
-            f"  [provider: {self.config.provider}] launching."
+            f"  [provider: {self.config.provider}] launching "
             f"{self.config.instance_type} in {self.config.region}"
         )
         instance = self.launch()
@@ -174,7 +174,7 @@ class BaseProvider(ABC):
         try:
             self.terminate(instance)
             print(
-                f"  [provider:{self.config.provider}]"
+                f"  [provider:{self.config.provider}] "
                 f"terminated: {instance.instance_id}"
             )
         except Exception as e:
@@ -187,7 +187,7 @@ class BaseProvider(ABC):
     def validate_ready(self, instance: ServerInstance) -> None:
         """
         Guard - raises ValueError if instance is not ready
-        Called at teh start of run_command() by all implementation
+        Called at the start of run_command() by all implementation
         """
         if not instance.is_ready:
             raise ValueError(
@@ -209,7 +209,7 @@ class BaseProvider(ABC):
             BaseProvider: Concrete provider instance 
         
         Raises:
-            ValueError: if provider is not supporter
+            ValueError: if provider is not supported
         """
         provider = config.provider.lower()
         

@@ -53,7 +53,7 @@ def _pipeline_summary(
     total_duration = 0.0
     failed_steps = []
     
-    for task_id in ti.get_dagrun(session=None).get_tak_instance():
+    for task_id in ti.get_dagrun(session=None).get_task_instance():
         raw = ti.xcom_pull(task_ids=task_id.task_id)
         if not raw or not isinstance(raw, dict):
             continue
@@ -96,7 +96,7 @@ def _pipeline_summary(
 
 def _build_dag(
     dag_id: str,
-    configs: list[AirflowConfigJob],
+    configs: list[AirflowJobConfig],
     segments: list[ExecutionSegment],
 ) -> DAG:
     """
@@ -107,7 +107,7 @@ def _build_dag(
 
     Args:
         dag_id (str): unique DAG identifier (= airflow_id)
-        configs (list[AirflowConfigJob]): cron-sorted list of all configs in this 
+        configs (list[AirflowJobConfig]): cron-sorted list of all configs in this 
             pipeline used for metadata
         segments (list[ExecutionSegment]): resolved ExecutionSegment list from segment_resolver
 
@@ -146,7 +146,6 @@ def _build_dag(
         "retry_delay":      timedelta(minutes=first.retry.delay_minutes),
         "email_on_failure": first.alerts.on_failure,
         "email_on_retry":   first.alerts.on_retry,
-        "email_on_success": first.alerts.on_success,
     }
     
     # Build DAG
@@ -162,9 +161,9 @@ def _build_dag(
     )
     
     # Wire segments 
-    upsteam_task:   PythonOperator | None = None
+    upstream_task:  PythonOperator | None = None
     is_first_cloud: bool                  = True
-    prev_instance_ref : None
+    prev_instance_ref: PythonOperator | None = None
     
     for idx, segment in enumerate(segments):
         executor = BaseExecutor.from_segment(segment)
@@ -181,9 +180,9 @@ def _build_dag(
             is_first_cloud = False
             # prev_instance_ref is resolved at runtime via XCom
             # we pass None here - XCom handles the actual instance handoff
-            prev_isntance_ref = None
+            prev_instance_ref = None
         
-        last_task     = executor.build_tasks(dag, upsteam_task)
+        last_task     = executor.build_tasks(dag, upstream_task)
         upstream_task = last_task
     
     # Summary task - always last
@@ -199,7 +198,7 @@ def _build_dag(
     )
     
     if upstream_task is not None:
-        summary_task.set_upsteam(upsteam_task)
+        summary_task.set_upstream(upstream_task)
 
     print(
         f"\n[dag_factory] Built DAG: {dag_id}\n"
@@ -212,7 +211,7 @@ def _build_dag(
     return dag
 
 def _build_tags(
-    configs: list[AirflowConfigJob],
+    configs: list[AirflowJobConfig],
     segments: list[ExecutionSegment],
 ) -> list[str]:
     """
@@ -271,7 +270,7 @@ def build_all_dags(
     
     
     # Group by airflow_id
-    pipelines: dict[str, list[AirflowConfigJob]] = {}
+    pipelines: dict[str, list[AirflowJobConfig]] = {}
     
     for cfg in all_configs:
         pipelines.setdefault(cfg.airflow_id, []).append(cfg)
