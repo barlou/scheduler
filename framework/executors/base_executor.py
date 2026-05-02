@@ -1,4 +1,4 @@
-# framework/executors/base_executors.py
+# framework/executors/base_executor.py
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -57,7 +57,7 @@ class TaskResult:
 
 class BaseExecutor(ABC):
     """
-    Abstract base class for pipeline semgent executors.
+    Abstract base class for pipeline segment executors.
     
     Each executor receives one ExecutionSegment and builds the Airflow tasks 
     for it inside the provided DAG.
@@ -109,11 +109,11 @@ class BaseExecutor(ABC):
     
     def _make_python_task(
         self,
-        dag:       DAG,
-        task_id:   str,
-        callable:  Callable,
-        op_kwargs: dict,
-        step:      AirflowJobConfig,
+        dag:             DAG,
+        task_id:         str,
+        python_callable: Callable,
+        op_kwargs:       dict,
+        step:            AirflowJobConfig,
     ) -> PythonOperator:
         """
         Build a single Python Operator task with retry and alert config derived 
@@ -133,13 +133,12 @@ class BaseExecutor(ABC):
         
         return PythonOperator(
             task_id =          task_id,
-            python_callable =  callable,
+            python_callable =  python_callable,
             op_kwargs =        op_kwargs,
             retries =          step.retry.attempts,
             retry_delay =      timedelta(minutes=step.retry.delay_minutes),
             email_on_failure = step.alerts.on_failure,
             email_on_retry =   step.alerts.on_retry,
-            email_on_success = step.alerts.on_success,
             dag =              dag,
         )
     
@@ -149,10 +148,10 @@ class BaseExecutor(ABC):
         upstream_task: "PythonOperator | None",
     ) -> None:
         """
-        Chain a list of tasks sequentially and connect to upsteam
+        Chain a list of tasks sequentially and connect to upstream
 
         Args:
-            tasks (list[PythonOperator]): order list of tasks to chain
+            tasks (list[PythonOperator]): ordered list of tasks to chain
             upstream_task (PythonOperator | None): task from previous segment to connect to first task
                 None if this segment starts the pipeline
         """
@@ -163,12 +162,12 @@ class BaseExecutor(ABC):
         if upstream_task is not None:
             tasks[0].set_upstream(upstream_task)
         
-        # Chain tasks withing segment sequentially
+        # Chain tasks within segment sequentially
         for i in range(1, len(tasks)):
             tasks[i].set_upstream(tasks[i - 1])
     
     def _log_segment_summary(self) -> None:
-        """Print a readable summary of this summary for Airflow task logs"""
+        """Print a readable summary of this segment for Airflow task logs"""
         server_label = (
             f"{self.segment.server.provider}:"
             f"{self.segment.server.instance_type}"
@@ -190,7 +189,7 @@ class BaseExecutor(ABC):
         Instantiate the correct executor base on segment.is_local
 
         Args:
-            segment (ExecutionSegment): resolve ExecutionSegment
+            segment (ExecutionSegment): resolved ExecutionSegment
 
         Returns:
             LocalExecutor: if segment.is_local

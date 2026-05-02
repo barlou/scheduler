@@ -43,7 +43,7 @@ AIRFLOW_VERSION="2.9.0"
 PYTHON_BIN="python3"
 
 # Secrets backend — ssm is the default to keep backward compatibility 
-SECRETS_BACKEND="${SECRETS_BACKENND:-ssm}"
+SECRETS_BACKEND="${SECRETS_BACKEND:-ssm}"
 
 LOG_FILE="$DEPLOYMENTS_BASE/airflow/logs/setup.log"
 mkdir -p "$DEPLOYMENTS_BASE/airflow/logs"
@@ -85,13 +85,13 @@ fetch_secret() {
     local ssm_suffix="$1"
     local env_var_name="${2}"
     local default="${3:-}"
-    local value= ""
+    local value=""
 
     case "${SECRETS_BACKEND}" in 
 
         # —— AWS SSM 
         ssm)
-            local full_path="${SSM_PREFIX}/${ssm_suffix}"
+            local full_path="/${SSM_PREFIX%/}${ssm_suffix}"
             value=$(aws ssm get-parameter \
                 --name            "$full_path" \
                 --with-decryption \
@@ -126,7 +126,7 @@ fetch_secret() {
             fi
             ;;
         *)
-            echo "::error::Unknown SECRETS_BACKEND: '$SECRETS_NACKEND'" >&2
+            echo "::error::Unknown SECRETS_BACKEND: '$SECRETS_BACKEND'" >&2
             echo "  Supported: ssm | github | env" >&2
             exit 1
             ;;
@@ -191,7 +191,9 @@ DB_NAME=$(fetch_secret    "/db/name"    "AIRFLOW_DB_NAME")
 DB_USER=$(fetch_secret    "/db/user"    "AIRFLOW_DB_USER")
 DB_PASSWORD=$(fetch_secret "/db/password"   "AIRFLOW_DB_PASSWORD")
 
-AIRFLOW_SECRET_KEY=$(fetch_secret "/secret_key" "AIRFLOW_SECRET_KEY")
+AIRFLOW_ACCESS_KEY=$(fetch_secret "/airflow/access_key" "AIRFLOW_ACCESS_KEY")
+AIRFLOW_SECRET_KEY=$(fetch_secret "/airflow/secret_key" "AIRFLOW_SECRET_KEY")
+ADMIN_PASSWORD=$(fetch_secret     "/admin/password"     "ADMIN_PASSWORD")
 
 SMTP_HOST=$(fetch_secret  "/smtp/host"  "AIRFLOW_SMTP_HOST"   "localhost")
 SMTP_PORT=$(fetch_secret  "/smtp/port"  "AIRFLOW_SMTP_PORT"   "587")
@@ -336,7 +338,7 @@ if [[ "$DB_EXISTS" == "false" ]]; then
     echo "  [OK] database initialised"
 
     # Create default admin user
-    ADMIN_PASSWORD=$(fetch_ssm "$SSM_PREFIX/admin/password" "admin")
+    ADMIN_PASSWORD=$(fetch_secret "$SSM_PREFIX/admin/password" "admin")
     AIRFLOW_HOME="$AIRFLOW_HOME" airflow users create \
         --username admin \
         --firstname Airflow \

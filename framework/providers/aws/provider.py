@@ -93,7 +93,7 @@ class AWSProvider(BaseProvider):
             
         except ClientError as e:
             raise RuntimeError(
-                f"  [AWS] failed to launch EC2 instances: {e}"
+                f"  [AWS] failed to launch EC2 instance: {e}"
             ) from e
         
         instance_data = response["Instances"][0]
@@ -149,13 +149,13 @@ class AWSProvider(BaseProvider):
         
         # Fetch public/private IPs after instance is running
         desc = self._ec2.describe_instances(InstanceIds=[instance_id])
-        inst = desc["Reservatins"][0]["Instances"][0]
+        inst = desc["Reservations"][0]["Instances"][0]
         
         instance.public_ip  = inst.get("PublicIpAddress", "")
         instance.private_ip = inst.get("PrivateIpAddress", "")
         
         print(
-            f"  [AWS] EC2 ready: {instance_id}"
+            f"  [AWS] EC2 ready: {instance_id} "
             f"(public={instance.public_ip}, private={instance.private_ip})"
         )
         
@@ -168,7 +168,7 @@ class AWSProvider(BaseProvider):
                 resp = self._ssm.describe_instance_information(
                     Filters=[{
                         "Key": "InstanceIds",
-                        "Value": [instance_id],
+                        "Values": [instance_id],
                     }]
                 )
                 info_list = resp.get("InstanceInformationList", [])
@@ -189,7 +189,7 @@ class AWSProvider(BaseProvider):
         )
     
     # Run command
-    def run_commands(
+    def run_command(
         self,
         instance: ServerInstance,
         commands: list[str],
@@ -266,7 +266,7 @@ class AWSProvider(BaseProvider):
                     print(f"    [EC2:{instance_id}] {line}")
             
             print(
-                f"  [AWS] SSM status: {status}"
+                f"  [AWS] SSM status: {status} "
                 f"(attempts {attempt + 1}/{_SSM_MAX_POLL})"
             )
             
@@ -289,7 +289,7 @@ class AWSProvider(BaseProvider):
         )
     
     # Terminate
-    def terminate(self, instance: ServerInstance) -> Nne:
+    def terminate(self, instance: ServerInstance) -> None:
         """
         Terminate the EC2 instance permanently 
         Safe to call if already, terminated - idempotent.

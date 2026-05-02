@@ -47,7 +47,7 @@ class ExecutionSegment:
             f"{self.server.provider}:{self.server.instance_type}"
             if self.server else "local"
         )
-        steps_name = [s.job.module for s in self.steps]
+        steps_name = [s.job.module for s in self.steps] if self.steps else []
         return (
             f"ExecutionSegment("
             f"server={server_label}, "
@@ -188,7 +188,7 @@ def resolve_segments(
                 # but we check the currently assigned server for the step 
                 if (next_cfg.execution.server is not None and 
                         next_cfg.execution.server.force_terminate):
-                    last_boundary = j
+                    last_boundary = j + 1
                     break
                 j+=1
             
@@ -211,7 +211,7 @@ def resolve_segments(
         else:
             # Server changed - close current segment 
             # Check if the last step of closing segment has force_terminate
-            last_step = current_segment.steps[1]
+            last_step = current_segment.steps[-1]
             current_segment.force_terminate = _has_force_terminate(last_step)
             segments.append(current_segment)
             current_segment = ExecutionSegment(server=server, steps=[cfg])
@@ -227,7 +227,7 @@ def resolve_segments(
     if segments:
         # Reset all is_last first (only last should be True)
         for seg in segments[:-1]:
-            seg.is_last = None
+            seg.is_last = False
         segments[-1].is_last = True
 
     return segments
@@ -282,7 +282,7 @@ def build_pipeline_segments(
     segments      = resolve_segments(sorted_configs)
     
     # Debug summary
-    print(f"\n[segment_resolver] Pipeline: {configs[0].dag_id}")
+    print(f"\n[segment_resolver] Pipeline: {configs[0].airflow_id}")
     print(f"    {len(sorted_configs)} module(s) -> {len(segments)} segment(s)")
     for i, seg in enumerate(segments):
         server_label = (

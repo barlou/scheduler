@@ -25,7 +25,7 @@ class ServerConfig:
         
 @dataclass
 class ExecutionConfig:
-        mode:   Literal["local", "instance"]
+        mode:   Literal["local", "cloud"]
         server: ServerConfig | None = None
 
 @dataclass
@@ -76,6 +76,7 @@ def _resolve_placeholders(raw: str) -> str:
         if value is None:
             missing.append(key)
             continue
+        raw = raw.replace("{{" + key + "}}", value)
         raw = raw.replace("{{ " + key + "}}", value)
         raw = raw.replace("{{ " + key + " }}", value)
         
@@ -94,7 +95,7 @@ _REQUIRED_TOP_LEVEL = ["airflow_id", "dag_id", "schedule", "execution", "job"]
 _REQUIRED_JOB       = ["module", "entry_point", "config_path"]
 _REQUIRED_SERVER    = [
     "provider", "instance_type", "region",
-    "ami_id", "subned_id", "security_group_id", "iam_instance_profile",
+    "ami_id", "subnet_id", "security_group_id", "iam_instance_profile",
 ]  
 _VALID_PROVIDERS    = {"aws", "gcp", "azure", "ovh"}
 _VALID_MODES        = {"local", "cloud"}
@@ -175,7 +176,7 @@ def load_job_config(config_path: Path) -> AirflowJobConfig:
         FileNotFoundError: if the file does not exist
         ValueError: if required fields are missing or invalid 
     """
-    if not config_path.exists:
+    if not config_path.exists():
         raise FileNotFoundError(f"airflow_job.yml not found: {config_path}")
     
     raw = config_path.read_text(encoding="utf-8")
@@ -186,7 +187,7 @@ def load_job_config(config_path: Path) -> AirflowJobConfig:
     cfg = yaml.safe_load(raw)
     
     if not isinstance(cfg, dict):
-        raise ValueError(f"{config_path}; file is empty or not valid YAML")
+        raise ValueError(f"{config_path}: file is empty or not valid YAML")
     
     _validate(cfg, config_path)
     

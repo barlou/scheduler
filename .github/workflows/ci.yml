@@ -84,6 +84,7 @@ jobs:
             croniter \
             boto3 \
             pytest \
+            pytz \
             --quiet
       - name: Run tests
         run: |
