@@ -33,8 +33,8 @@ set -euo pipefail
 # Variable initialisation
 AIRFLOW_ID="${1:-airflow-prod-1}"
 ENVIRONMENT="${2:-production}"
-AIRFLOW_HOME="${AIRFLOW_HOME:-$HOME/airflow}"
 DEPLOYMENTS_BASE="${DEPLOYMENTS_BASE:-$HOME/deployments}"
+AIRFLOW_HOME="${DEPLOYMENTS_BASE}/airflow"
 AIRFLOW_PORT="${AIRFLOW_PORT:-8080}"
 TIMEZONE="${TIMEZONE:-Europe/Paris}"
 PARALLELISM="${PARALLELISM:-8}"
@@ -226,7 +226,7 @@ echo ""
 echo "--- Step 4: Render airflow.cfg ---"
 
 TEMPLATE="$DEPLOYMENTS_BASE/airflow/airflow.cfg.template"
-OUTPUT="$AIRFLOW_HOME/airflow.cfg"
+OUTPUT="$DEPLOYMENTS_BASE/airflow/airflow.cfg"
 
 if [ ! -f "$TEMPLATE" ]; then
     echo "::error::Template not found: $TEMPLATE"
@@ -274,41 +274,16 @@ print(f"  [OK] rendered: {output_path}")
 PYEOF
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 5 — Deploy framework and DAG loader
+# STEP 5 — Export AIRFLOW_ID for dag_factory_loader
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
-echo "--- Step 5: Deploy framework ---"
-
-SCHEDULER_SRC="$DEPLOYMENTS_BASE/airflow"
-
-# Copy framework to AIRFLOW_HOME
-if [ -d "$SCHEDULER_SRC/framework" ]; then
-    rm -rf "$AIRFLOW_HOME/framework"
-    cp -r "$SCHEDULER_SRC/framework" "$AIRFLOW_HOME/framework"
-    echo "  [OK] framework deployed"
-else
-    echo "::error::framework/ not found at $SCHEDULER_SRC/framework"
-    exit 1
-fi
-
-# Copy DAG loader
-if [ -f "$SCHEDULER_SRC/dags/dag_factory_loader.py" ]; then
-    cp "$SCHEDULER_SRC/dags/dag_factory_loader.py" \
-       "$AIRFLOW_HOME/dags/dag_factory_loader.py"
-    echo "  [OK] dag_factory_loader.py deployed"
-else
-    echo "::error::dag_factory_loader.py not found"
-    exit 1
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STEP 6 — Export AIRFLOW_ID for dag_factory_loader
-# ─────────────────────────────────────────────────────────────────────────────
-echo ""
-echo "--- Step 6: Configure environment ---"
+echo "--- Step 5: Configure environment ---"
 
 # Write AIRFLOW_HOME and AIRFLOW_ID to a persistent env file
 # Sourced by Airflow service on startup
+unset AIRFLOW_HOME
+
+AIRFLOW_HOME="$DEPLOYMENTS_BASE/airflow"
 ENV_FILE="$AIRFLOW_HOME/.airflow_env"
 
 cat > "$ENV_FILE" <<EOF
@@ -323,10 +298,10 @@ source "$ENV_FILE"
 echo "  [OK] environment configured at $ENV_FILE"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 7 — Initialise database if first run
+# STEP 6 — Initialise database if first run
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
-echo "--- Step 7: Database initialisation ---"
+echo "--- Step 6: Database initialisation ---"
 
 AIRFLOW_HOME="$AIRFLOW_HOME" airflow db check 2>/dev/null \
     && DB_EXISTS=true \
@@ -356,13 +331,16 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 8 — Start or reload services
+# STEP 7 — Start or reload services
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
-echo "--- Step 8: Start services ---"
+echo "--- Step 7: Start services ---"
+
+unset AIRFLOW_HOME
+AIRFLOW_HOME="$DEPLOYMENTS_BASE/airflow"
 
 # Scheduler
-if service_running "airflow scheduler"; then
+if pgrep -f "airflow scheduler" >/dev/null 2>&1; then
     echo "  Scheduler running — triggering DAG reserialization..."
     AIRFLOW_HOME="$AIRFLOW_HOME" airflow dags reserialize 2>/dev/null || true
     echo "  [OK] DAGs reloaded"
@@ -376,9 +354,14 @@ else
 fi
 
 # Webserver
-if service_running "airflow webserver"; then
+if AIRFLOW_HOME="$AIRFLOW_HOME" airflow webserver --VERSION &>/dev/null && \
+    curl -s connect-timeout 3 "https://localhost:$AIRFLOW_PORT/health" | grep -q "healthy"; then
     echo "  [OK] webserver already running on port $AIRFLOW_PORT"
 else
+    # Kill any stale webserver process before starting fresh
+    pkill -f "airflow webserver" 2>/dev/null || true
+    sleep 2
+
     echo "  Starting webserver on port $AIRFLOW_PORT..."
     AIRFLOW_HOME="$AIRFLOW_HOME" airflow webserver \
         --daemon \
@@ -388,7 +371,7 @@ else
 
     # Wait for webserver to be ready
     RETRIES=12
-    until curl -s "http://localhost:$AIRFLOW_PORT/health" \
+    until curl -s --connect-timeout 3 "http://localhost:$AIRFLOW_PORT/health" \
           | grep -q "healthy" || [ "$RETRIES" -eq 0 ]; do
         echo "  Waiting for webserver... ($RETRIES retries left)"
         sleep 5
