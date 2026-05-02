@@ -7,7 +7,7 @@
 
 [core]
 # Home directory for all Airflow files
-airflow_home = {{ AIRFLOW_HOME }}
+# airflow_home = {{ AIRFLOW_HOME }}
 
 # DAG folder — Airflow scans this every dag_dir_list_interval seconds
 dags_folder = {{ AIRFLOW_HOME }}/dags
@@ -69,6 +69,9 @@ web_server_worker_timeout = 120
 # Expose configuration in the UI — disable in production
 expose_config = False
 
+# Disable in-memory rate limiter warning
+ratelimit_storage_url = memory://
+
 [scheduler]
 # How often the scheduler checks for new DAG files
 dag_dir_list_interval = 30
@@ -123,7 +126,7 @@ result_backend = db+postgresql://{{ DB_USER }}:{{ DB_PASSWORD }}@{{ DB_HOST }}:{
 
 [api]
 # REST API authentication
-auth_backends = airflow.api.auth.backend.basic_auth
+auth_backends = airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
 
 [metrics]
 # StatsD metrics — optional
