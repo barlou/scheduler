@@ -1,15 +1,49 @@
-# Framework/segment_resolver.py
+# framework/segment_resolver.py
+"""
+segment_resolver.py
+===================
+Groups pipeline steps into ExecutionSegments based on their declared
+``pipeline.position`` and ``execution.mode``.
+
+This module replaces cron-based ordering (previous behaviour) with
+explicit position ordering. Each job declares its own integer position
+within the pipeline — no more inferring order from schedule times.
+
+Segment assignment rules are unchanged:
+
+RULE 1 — Cloud backwards pull:
+    When a module declares mode=cloud, all preceding modules back to
+    the pipeline start OR the previous force_terminate boundary are
+    pulled into the same server segment.
+
+RULE 2 — Segment inheritance:
+    After a cloud declaration, subsequent local modules inherit the
+    current instance until the next instance declaration or force_terminate.
+
+RULE 3 — force_terminate:
+    Closes the current segment. Next instance declaration starts fresh.
+
+RULE 4 — Parallel terminate/launch:
+    Segment boundaries where a new instance starts while a previous one
+    is running are flagged (force_terminate=True on the closing segment).
+    cloud_executor handles the actual parallelism.
+
+RULE 5 — Singleton validation:
+    If a pipeline contains a singleton job, no other job may share the
+    same airflow_id. Raised at build time as a ValueError.
+
+References
+----------
+- Airflow DAG dependencies: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterator
-
-from croniter import croniter 
 
 from framework.config_loader import AirflowJobConfig, ServerConfig
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Output dataclass — one segment = one server context
+#       Output dataclass 
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -56,29 +90,56 @@ class ExecutionSegment:
             f"is_last={self.is_last})"
         )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Sorting — position-based (replaces cron-based ordering)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sort_by_position(configs: list[AirflowJobConfig]) -> list[AirflowJobConfig]:
+    """
+    Sort a list of job configs by their explicit ``pipeline.position``.
+
+    Raises
+    ------
+    ValueError
+        If two configs within the same pipeline share the same position.
+    """
+    # Validate uniqueness
+    positions = [c.pipeline.position for c in configs]
+    if len(positions) != len(set(positions)):
+        duplicates = [p for p in positions if positions.count(p) > 1]
+        raise ValueError(f"Duplicate pipeline positions detected: {sorted(set(duplicates))}. Each job within a pipeline must have a unique position.")
+    return sorted(configs, key=lambda c: c.pipeline.position)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cron helpers
+# Singleton validation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _cron_sort_key(cfg: AirflowJobConfig) -> float:
+def validate_singleton(configs: list[AirflowJobConfig]) -> None:
     """
-    Return the next schedule timestamp for a cron expression.
-    Used to sort modules within a pipeline by execution order
-    
-    Earlier cron = lower timestamp = runs first
+    Raise ValueError if a singleton pipeline contains more than one job.
+
+    A pipeline is singleton when any of its jobs declares
+    ``pipeline.is_singleton: true``. In that case, no other job
+    may belong to the same airflow_id.
+
+    Parameters
+    ----------
+    configs : list[AirflowJobConfig]
+        All configs belonging to the same pipeline (same airflow_id).
+
+    Raises
+    ------
+    ValueError
+        If a singleton pipeline has more than one job.
     """
-    try:
-        return croniter(cfg.schedule).get_next(float)
-    except Exception:
+    singleton_jobs = [c for c in configs if c.pipeline.is_singleton]
+    if singleton_jobs and len(configs) > 1:
+        modules = [c.job.module for c in configs]
         raise ValueError(
-            f"Invalid cron expression '{cfg.schedule}'"
-            f"in {cfg.source_path}"
+            f"Pipeline '{configs[0].airflow_id}' is declared as singleton "
+            f"but contains {len(configs)} jobs: {modules}. "
+            "A singleton pipeline may contain exactly one job."
         )
-        
-def sort_by_cron(configs: list[AirflowJobConfig]) -> list[AirflowJobConfig]:
-    """Sort a list of jobs config by their cron schedule ascending."""
-    return sorted(configs, key=_cron_sort_key)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Core segment resolution logic
@@ -88,36 +149,19 @@ def resolve_segments(
     sorted_configs: list[AirflowJobConfig],
 ) -> list[ExecutionSegment]:
     """
-    Give a cron-sorted list of modules belonging to one pipeline, 
-    resolve them into ExecutionSegments applying these rules:
-    
-    RULE 1 - Cloud backwards pull:
-        When a module declares mode=cloud, all preceding modules back to the pipeline 
-        start OR the previous force_terminate boundary are pull into the same server segment
-    
-    RULE 2 - Segment inheritance:
-        After an instance declaration, subsequent local modules inherit that instance
-        segment until the next instance declaration or force_terminate
-    
-    RULE 3 - force_terminate:
-        Closes the current segment after this module
-        The next instance declaration still applies backwards pull from this boundary
-    
-    RULE 4 - Parallel terminate/launch:
-        Segment boundaries where a new instance starts while a previous one is running are flagged here (force_terminate=True on the closing segment).
-        cloud_executor handles the parallelism 
-        
-    RULE 5 - Local before first instance:
-        Modules before the first instance declaration that get pulled into an instance segment
-        are marked as pulled - they run on the instance, not locally
-        
-    Args:
-        sorted_configs (list[AirflowJobConfig]): cron-sorted list of AirflowJobConfig
-                                        all belonging to the same pipeline (airflow_id)
+    Given a position-sorted list of modules, resolve them into
+    ExecutionSegments applying cloud backwards pull and inheritance rules.
 
-    Returns:
-        list[ExecutionSegment]: in execution order
-            Empty list if sorted_config is empty
+    Parameters
+    ----------
+    sorted_configs : list[AirflowJobConfig]
+        Position-sorted list of AirflowJobConfig, all belonging to
+        the same pipeline (same airflow_id).
+
+    Returns
+    -------
+    list[ExecutionSegment]
+        In execution order. Empty list if input is empty.
     """
     if not sorted_configs:
             return []
@@ -223,12 +267,13 @@ def resolve_segments(
         current_segment.is_last = True
         segments.append(current_segment)
     
+    # Reset all is_last first (only last should be True)
+    for seg in segments[:-1]:
+        seg.is_last = False
     # Mark is_last on the actual last segment
     if segments:
-        # Reset all is_last first (only last should be True)
-        for seg in segments[:-1]:
-            seg.is_last = False
-        segments[-1].is_last = True
+        segments[-1].is_last = True 
+
 
     return segments
 
@@ -267,19 +312,31 @@ def build_pipeline_segments(
 ) -> list[ExecutionSegment]:
     """
     Full pipeline resolution:
-        1. Sort by cron
-        2. Resolve segments
+        1. Validate singleton constraint
+        2. Sort by position (explicit, replaces cron ordering)
+        3. Resolve segments
 
-    Args:
-        configs (list[AirflowJobConfig]): unsorted list or AirflowJobConfig for one pipeline (airflow_id)
+    Parameters
+    ----------
+    configs : list[AirflowJobConfig]
+        Unsorted list of AirflowJobConfig for one pipeline (same airflow_id).
 
-    Returns:
-        list[ExecutionSegment]: Ordered list of ExecutionSegment ready for executor consumption
+    Returns
+    -------
+    list[ExecutionSegment]
+        Ordered list of ExecutionSegment ready for executor consumption.
+
+    Raises
+    ------
+    ValueError
+        On singleton violation or duplicate positions.
     """
     if not configs:
         return []
-    sorted_configs = sort_by_cron(configs)
-    segments      = resolve_segments(sorted_configs)
+    
+    validate_singleton(configs)
+    sorted_configs = sort_by_position(configs)
+    segments       = resolve_segments(sorted_configs)
     
     # Debug summary
     print(f"\n[segment_resolver] Pipeline: {configs[0].airflow_id}")
