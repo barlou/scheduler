@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from datetime import datetime, timezone as _tz
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Dataclasses — one per section of airflow_job.yml
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,9 +32,10 @@ class ExecutionConfig:
 
 @dataclass
 class JobConfig:
-        module:         str
-        entry_point:    str
-        config_path:    str
+        module:           str
+        entry_point:      str
+        config_path:      str
+        base_output_name: str | None = None 
 
 @dataclass
 class RetryConfig:
@@ -46,18 +49,125 @@ class AlertConfig:
     on_success: bool = False
 
 @dataclass
+class PipelineConfig:
+    """
+    Pipeline-level metadata controlling execution order, dependencies,
+    and data accumulation behaviour.
+
+    Attributes
+    ----------
+    position : int
+        Explicit execution order within the pipeline (1-based).
+        Lower = runs first. Must be unique within a pipeline.
+        Replaces the previous cron-based ordering.
+    upstream_jobs : list[str]
+        airflow_id values this job depends on.
+        Used by the framework to detect shared upstreams and
+        infer frequency relationships (mandatory vs accumulation).
+    is_singleton : bool
+        When True, this pipeline accepts no additional jobs.
+        Raises a validation error at DAG build time if another job
+        declares the same airflow_id.
+    chunk_threshold : int
+        Number of accumulated upstream files above which parallel
+        chunk processing is triggered instead of sequential processing.
+        Default: 10. Override per job when file sizes differ significantly.
+    max_parallel_chunks : int
+        Maximum number of Airflow worker tasks spawned in parallel
+        during chunk processing. Must be <= Airflow parallelism setting.
+        Default: 4.
+    """
+    position:            int
+    upstream_jobs:       list[str] = field(default_factory=list)
+    is_singleton:        bool      = False
+    chunk_threshold:     int       = 10
+    max_parallel_chunks: int       = 4
+
+@dataclass
 class AirflowJobConfig:
     airflow_id:     str
     dag_id:         str
     schedule:       str
     execution:      ExecutionConfig
     job:            JobConfig
+    pipeline:       PipelineConfig
     description:    str         = ""
     timezone:       str         = "Europe/Paris"
     enabled:        bool        = True
     retry:          RetryConfig = field(default_factory=RetryConfig)
     alerts:         AlertConfig = field(default_factory=AlertConfig)
     source_path:    Path        = field(default_factory=Path)
+    
+# ─────────────────────────────────────────────────────────────────────────────
+# File naming convention — used by all framework components
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_output_path(base_name: str, extension: str) -> str:
+    """
+    Build a dated output filename following the framework convention.
+
+    The date is injected automatically by the framework — the caller
+    provides only the semantic base name and file extension.
+    This convention lets the framework detect whether an upstream has
+    produced a new file since the last run of a downstream job.
+
+    Convention: ``{base_name}_{YYYY-MM-DD}{extension}``
+
+    Parameters
+    ----------
+    base_name : str
+        Semantic name of the output, e.g. ``"transactions"`` or
+        ``"daily_snapshot"``. Must not contain slashes.
+    extension : str
+        File extension including the leading dot, e.g. ``".parquet"``,
+        ``".csv"``, ``".json"``.
+
+    Returns
+    -------
+    str
+        Filename with UTC date injected, e.g.
+        ``"transactions_2026-05-03.parquet"``.
+
+    Examples
+    --------
+    >>> build_output_path("transactions", ".parquet")
+    'transactions_2026-05-03.parquet'
+    """
+    date_str = datetime.now(_tz.utc).strftime("%Y-%m-%d")
+    return f"{base_name}_{date_str}{extension}"
+
+def extract_file_date(filename: str) -> datetime | None:
+    """
+    Extract the production date from a framework-convention filename.
+
+    Expects the pattern ``{any_prefix}_{YYYY-MM-DD}{any_suffix}``.
+    Returns None if the pattern is not found.
+
+    Parameters
+    ----------
+    filename : str
+        Filename or full path string, e.g.
+        ``"transactions_2026-05-03.parquet"``.
+
+    Returns
+    -------
+    datetime | None
+        Timezone-aware UTC datetime on success, None otherwise.
+
+    Examples
+    --------
+    >>> extract_file_date("transactions_2026-05-03.parquet")
+    datetime.datetime(2026, 5, 3, 0, 0, tzinfo=datetime.timezone.utc)
+    >>> extract_file_date("no_date_here.parquet")
+    None
+    """
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", filename)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y-%m-%d").replace(tzinfo=_tz.utc)
+    except ValueError:
+        return None
     
 # ─────────────────────────────────────────────────────────────────────────────
 # Placeholder resolution — same {{ PLACEHOLDER }} convention as config.template.json
@@ -93,6 +203,7 @@ def _resolve_placeholders(raw: str) -> str:
 
 _REQUIRED_TOP_LEVEL = ["airflow_id", "dag_id", "schedule", "execution", "job"]
 _REQUIRED_JOB       = ["module", "entry_point", "config_path"]
+_REQUIRED_PIPELINE  = ["position"]
 _REQUIRED_SERVER    = [
     "provider", "instance_type", "region",
     "ami_id", "subnet_id", "security_group_id", "iam_instance_profile",
@@ -110,29 +221,22 @@ def _validate(cfg: dict, source: Path) -> None:
             errors.append(f"missing required field: '{key}'")
     
     if errors:
-        raise ValueError(
-            f"{source}:\n" + "\n".join(f"   - {e}" for e in errors)
-        )
+        raise ValueError(f"{source}:\n" + "\n".join(f"   - {e}" for e in errors))
         
     # Execution mode
     execution = cfg.get("execution", {})
     mode = execution.get("mode")
     if mode not in _VALID_MODES:
-        errors.append(
-            f"execution.mode must be one of {_VALID_MODES}, got: '{mode}'"
-        )
+        errors.append(f"execution.mode must be one of {_VALID_MODES}, got: '{mode}'")
         
     if mode == "cloud":
         server = execution.get("server")
         if not server:
-            errors.append(
-                "execution.mode=cloud but no 'server' block declared"
-            )
+            errors.append("execution.mode=cloud but no 'server' block declared")
         else:
             for key in _REQUIRED_SERVER:
                 if key not in server:
                     errors.append(f"execution.server.{key} is required when mode=cloud")
-                    
             provider = server.get("provider")
             if provider not in _VALID_PROVIDERS:
                 errors.append(
@@ -145,6 +249,24 @@ def _validate(cfg: dict, source: Path) -> None:
     for key in _REQUIRED_JOB:
         if key not in job:
             errors.append(f"job.{key} is required")
+    
+    # Pipeline required fields
+    pipeline = cfg.get("pipeline", {})
+    for key in _REQUIRED_PIPELINE:
+        if key not in pipeline:
+            errors.append(f"pipeline.{key} is required")
+    
+    position = pipeline.get("position")
+    if position is not None and (not isinstance(position, int) or position < 1):
+        errors.append(f"pipeline.position must be a positive integer (>=1), got: '{position}'")
+        
+    chunk_threshold = pipeline.get("chunk_threshold", 10)
+    if not isinstance(chunk_threshold, int) or chunk_threshold < 1:
+        errors.append(f"pipeline.chunk_threshold must be a positive integer, got '{chunk_threshold}'")
+    
+    max_parallel = pipeline.get("max_parallel_chunk", 4)
+    if not isinstance(max_parallel, int) or max_parallel < 1:
+        errors.append(f"pipeline.max_parallele_chunks must be a positive integer, got: '{max_parallel}'")
     
     # Schedule - basic cron validation (5 fields)
     schedule = cfg.get("schedule", "")
@@ -209,16 +331,23 @@ def load_job_config(config_path: Path) -> AirflowJobConfig:
             force_terminate=        server_raw.get("force_terminate", False),
         )
     
-    execution = ExecutionConfig(
-        mode=  execution_raw["mode"],
-        server=server,
-    )
+    execution = ExecutionConfig(mode=execution_raw["mode"], server=server)
     
     job_raw = cfg["job"]
     job = JobConfig(
-        module=      job_raw["module"],
-        entry_point= job_raw["entry_point"],
-        config_path= job_raw["config_path"],
+        module=           job_raw["module"],
+        entry_point=      job_raw["entry_point"],
+        config_path=      job_raw["config_path"],
+        base_output_name= job_raw.get("base_output_name")
+    ) 
+    
+    pipeline_raw = cfg["pipeline"]
+    pipeline = PipelineConfig(
+        position=            pipeline_raw["position"],
+        upstream_jobs=       pipeline_raw.get("upstream_jobs", []),
+        is_singleton=        pipeline_raw.get("is_singleton", False),
+        chunk_threshold=     pipeline_raw.get("chunk_threshold", 10),
+        max_parallel_chunks= pipeline_raw.get("max_parallel_chunks", 4)
     )
     
     retry_raw = cfg.get("retry", {})
@@ -243,6 +372,7 @@ def load_job_config(config_path: Path) -> AirflowJobConfig:
         enabled=        cfg.get("enabled", True),
         execution=      execution,
         job=            job,
+        pipeline=       pipeline,
         retry=          retry,
         alerts=         alerts,
         source_path=    config_path,
@@ -280,7 +410,7 @@ def scan_job_configs(
                 continue
             
             configs.append(cfg)
-            print(f"[OK] loaded: {cfg.dag_id} ({cfg.job.module}) - {cfg.execution.mode}")
+            print(f"[OK] loaded: {cfg.dag_id} ({cfg.job.module}) position={cfg.pipeline.position} - {cfg.execution.mode}")
         
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
