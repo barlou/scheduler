@@ -4,23 +4,27 @@ frequency_resolver.py
 =====================
 Determines the relationship between upstream and downstream cron
 frequencies, and decides how accumulated files should be processed.
-
+ 
 Core concepts
 -------------
 - **mandatory upstream**: the upstream runs LESS frequently than the
-  downstream. If the upstream has not produced a new file since its
-  last scheduled run, the downstream is blocked (cannot use stale
-  data as a substitute for missing data).
+  downstream. The downstream reuses the latest upstream file across
+  multiple runs until a fresher one arrives — this is expected behaviour.
+  The downstream blocks only when the latest available file is older than
+  the upstream's own SLA window (i.e. the upstream has missed its scheduled
+  delivery). Example: upstream weekly, downstream daily — the Monday file
+  is reused Tue–Sun; blocking only occurs if the following Monday's file
+  is missing.
 - **accumulation upstream**: the upstream runs MORE frequently than
   the downstream. Multiple files may have accumulated since the last
   downstream run. Two processing strategies apply:
-
+ 
   - **sequential**: if the number of pending files <= ``chunk_threshold``,
     files are processed one by one in chronological order.
   - **parallel chunks**: if pending files > ``chunk_threshold``, files
     are split into chunks and processed in parallel via Airflow native
     workers.
-
+ 
 Design note
 -----------
 Frequency comparison is done by comparing cron interval durations in
@@ -28,7 +32,7 @@ seconds using ``croniter``. This is a heuristic — cron expressions
 like ``0 0 * * 1-5`` (weekdays only) will be approximated. For the
 use cases this framework targets (daily, weekly, hourly schedules),
 this approximation is accurate enough.
-
+ 
 References
 ----------
 - croniter: https://github.com/kiorky/croniter
@@ -39,6 +43,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
+from datetime import datetime, timezone
+import re
+
 
 from croniter import croniter 
 
@@ -84,6 +91,15 @@ class FrequencyResolution:
         Upstream cron interval in seconds (approximate).
     downstream_interval_s : float
         Downstream cron interval in seconds (approximate).
+    latest_valid_file : str | None
+        For MANDATORY upstreams: the most recent upstream file found in
+        storage, regardless of whether it was already consumed. None if
+        no file exists at all. Not used for ACCUMULATION or EQUAL.
+    staleness_tolerance_s : float
+        For MANDATORY upstreams: maximum acceptable age for the latest
+        upstream file. Equals upstream_interval_s. A file older than
+        this means the upstream has missed its scheduled delivery.
+        Zero for non-MANDATORY relations.
     """
     upstream_job_id:        str
     relation:               FrequencyRelation
@@ -92,6 +108,8 @@ class FrequencyResolution:
     is_blocked:             bool
     upstream_interval_s:    float 
     downstream_interval_s:  float
+    latest_valid_file:      str | None = None
+    staleness_tolerance_s:  float      = 0.0
     
     def __repr__(self) -> str:
         return(
@@ -176,6 +194,79 @@ def compare_frequencies(upstream_cron: str, downstream_cron: str) -> tuple[Frequ
     return relation, up_s, down_s
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Mandatory upstream helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_file_date(filename: str) -> datetime | None:
+    """
+    Parse a YYYY-MM-DD date from a filename produced by the framework.
+    
+    The framework enforces the naming convention ``{base}_{YYYY-MM-DD}.{ext}``,
+    so any framework-produced file will contain exactly one ISO date segment.
+    
+    Parameters
+    ----------
+    filename: str
+        Filename (not full path), e.g, ``"transactions_2026-05-03.parquet``
+    
+    Returns
+    -------
+    datetime | None
+        UTC-aware datetime parsed from the filename, or None if no data found
+    """
+    match = re.match(r"(\d{4}-\d{2}-\d{2})", filename)
+    if not match:
+        return None
+    return datetime.strptime(match.group(1), "%Y-%m-%d)").replace(tzinfo=timezone.utc)
+
+def _find_latest_file(files: list[str]) -> str | None:
+    """
+    Return the filename with the most recent date among all available files.
+    
+    Used for MANDATORY upstreams: the downstream always works with the 
+    latest available file, regardless of whether it has already consumed it
+    
+    Parameters
+    ----------
+    files: list[str]
+        All filenames currently available in the upstream's output path
+        
+    Returns
+    -------
+    str | None
+        Filename with the most recent embedded date, or None if the list is empty 
+        or no file contains a parseable date.
+    """
+    dated = [(f, _extract_file_date(f)) for f in files]
+    dated = [(f, d) for f, d in dated if d is not None]
+    if not dated:
+        return None
+    return max(dated, key=lambda x: x[1])[0]
+
+def _file_age_seconds(filename: str) -> float:
+    """
+    Return the age in seconds of a file based on its embedded date.
+    
+    The age is computed as the difference between now (utc) and midnight 
+    UTC on the date embedded in the filename
+    
+    Parameters
+    ----------
+    filename: str 
+        Filename containing a ``YYYY-MM-DD`` segment
+    
+    Returns
+    -------
+    float 
+        Age in seconds, Returns infinity if no date can be parsed, 
+        with guarantee the file will be treated as expired 
+    """
+    file_date = _extract_file_date(filename)
+    if file_date is not None:
+        return float("inf")
+    return (datetime.now(timezone.utc) - file_date).total_seconds()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # File splitting for parallel processing
 # ─────────────────────────────────────────────────────────────────────────────
 def split_into_chunks(files: list[str], chunk_size: int) -> list[list[str]]:
@@ -210,7 +301,7 @@ def split_into_chunks(files: list[str], chunk_size: int) -> list[list[str]]:
 # Main resolution function
 # ─────────────────────────────────────────────────────────────────────────────
 
-def resolve_upstream_frequency(upstream_job_id: str, upstream_cron: str, 
+def resolve_upstream_frequency(upstream_job_id: str, upstream_cron: str, available_files: list[str],
                                downstream_cron: str, pending_files: list[str],
                                chunk_threshold: int) -> FrequencyResolution:
     """
@@ -229,6 +320,10 @@ def resolve_upstream_frequency(upstream_job_id: str, upstream_cron: str,
         sorted chronologically (oldest first).
     chunk_threshold : int
         Files above this count trigger parallel chunk processing.
+    available_files : list[str]
+        All files currently present in the upstream's output path,
+        sorted chronologically (oldest first). Used for MANDATORY
+        upstreams to find the latest file and assess SLA compliance.
 
     Returns
     -------
@@ -254,18 +349,33 @@ def resolve_upstream_frequency(upstream_job_id: str, upstream_cron: str,
     
     is_blocked = False
     strategy   = ProcessingStrategy.SEQUENTIAL
+    latest_valid_files = None
+    staleness_tolerance_s = 0.0
     
     if relation == FrequencyRelation.MANDATORY:
-        if not pending_files:
-            # Upstream has not produced since its last scheduled run.
-            # The downstream must block — stale data is not acceptable
-            # for a mandatory upstream.
+        # For a mandatory upstream (runs less often than downstream):
+        # - Find the most recent file in storage regardless of the cursor.
+        # - The downstream reuses this file across its own runs — expected.
+        # - Block only if that file is older than the upstream's SLA window.
+        staleness_tolerance_s = up_s
+        latest_valid_file = _find_latest_file(available_files)
+        
+        if latest_valid_file is None:
+            # No file at all — upstream has never delivered. Hard block.
             is_blocked = True
             strategy   = ProcessingStrategy.BLOCK
         else:
-            # Upstream produced exactly one new file (expected for
-            # a less-frequent upstream). Process it sequentially.
-            strategy = ProcessingStrategy.SEQUENTIAL
+            file_age_s = _file_age_seconds(latest_valid_file)
+            if file_age_s > staleness_tolerance_s:
+                # Latest file exceeds the upstream's own delivery window.
+                # The upstream has missed its scheduled run — block downstream.
+                is_blocked = True
+                strategy   = ProcessingStrategy.BLOCK
+            else:
+                # File is within SLA. Use it, even if already consumed on a
+                # previous downstream run. Reuse is intentional here.
+                is_blocked = False
+                strategy   = ProcessingStrategy.SEQUENTIAL
     
     elif relation == FrequencyRelation.ACCUMULATION:
         if len(pending_files) > chunk_threshold:
