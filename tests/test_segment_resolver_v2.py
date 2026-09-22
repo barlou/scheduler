@@ -30,6 +30,7 @@ def _make_local(module: str, position: int, airflow_id: str = "test_pipeline") -
         job=         JobConfig(module=module, entry_point="src/main.py", config_path="cfg.json"),
         pipeline=    PipelineConfig(position=position),
         source_path= Path(f"/fake/{module}/airflow/airflow_job.yml"),
+        pipeline =   PipelineConfig,
     )
 
 
