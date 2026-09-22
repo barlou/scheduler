@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 
 ---
+## [scheduler-v2.0.2] - 2026-09-22
+
+## scheduler v2.0.2
+
+> **Bump type:** Patch - bug fix
+> **Previous version:** scheduler-v2.0.1
+
+### Fixes
+- fix: corrected tests ([`dc63aa7`](../../commit/dc63aa7)) - Louis Barillon
+- fix: correct how the framework handle a frequency lowest for an upstream ([`b44da08`](../../commit/b44da08)) - Louis Barillon
+
+
+---
+---
 ## [scheduler-v2.0.1] - 2026-09-22
 
 ## scheduler v2.0.1
