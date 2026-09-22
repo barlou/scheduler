@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from framework.config_loader import AirflowJobConfig, ServerConfig
+from framework.config_loader import AirflowJobConfig, ServerConfig, PipelineConfig
 
 # ─────────────────────────────────────────────────────────────────────────────
 #       Output dataclass 
@@ -368,10 +368,11 @@ if __name__ == "__main__":
         RetryConfig, AlertConfig, ServerConfig
     )
     
-    def _make_local(module: str, schedule: str) -> AirflowJobConfig:
+    def _make_local(module: str, schedule: str, position: int = 1) -> AirflowJobConfig:
         return AirflowJobConfig(
             airflow_id="test_pipeline",
             dag_id="test_pipeline",
+            pipeline=PipelineConfig(position=position),
             schedule=schedule,
             execution=ExecutionConfig(mode="local"),
             job=JobConfig(
@@ -387,6 +388,7 @@ if __name__ == "__main__":
         schedule: str,
         instance_type: str = "t3.large",
         force_terminate: bool = False,
+        position: int = 1,
     ) -> AirflowJobConfig:
         server = ServerConfig(
             provider="aws",
@@ -401,6 +403,7 @@ if __name__ == "__main__":
         return AirflowJobConfig(
             airflow_id="test_pipeline",
             dag_id="test_pipeline",
+            pipeline=PipelineConfig(position=position),
             schedule=schedule,
             execution=ExecutionConfig(mode="cloud", server=server),
             job=JobConfig(
