@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 
 ---
+## [scheduler-v2.0.1] - 2026-09-22
+
+## scheduler v2.0.1
+
+> **Bump type:** Patch - bug fix
+> **Previous version:** scheduler-v2.0.0
+
+### Fixes
+- fix: correct how the framework handle a frequency lowest for an upstream ([`4385cae`](../../commit/4385cae)) - Louis Barillon
+- fix: correct how the framework handle a frequency lowest for an upstream ([`6fdcb67`](../../commit/6fdcb67)) - Louis Barillon
+
+
+---
+---
 ## [scheduler-v2.0.0] - 2026-05-03
 
 ## scheduler v2.0.0
