@@ -368,7 +368,7 @@ if __name__ == "__main__":
         RetryConfig, AlertConfig, ServerConfig
     )
     
-    def _make_local(module: str, schedule: str, position: int = 1) -> AirflowJobConfig:
+    def _make_local(module: str, schedule: str, position: int) -> AirflowJobConfig:
         return AirflowJobConfig(
             airflow_id="test_pipeline",
             dag_id="test_pipeline",
@@ -386,9 +386,9 @@ if __name__ == "__main__":
     def _make_cloud(
         module: str,
         schedule: str,
+        position: int,
         instance_type: str = "t3.large",
         force_terminate: bool = False,
-        position: int = 1,
     ) -> AirflowJobConfig:
         server = ServerConfig(
             provider="aws",
