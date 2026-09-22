@@ -53,8 +53,8 @@ def _pipeline_summary(
     total_duration = 0.0
     failed_steps = []
     
-    for task_id in ti.get_dagrun(session=None).get_task_instance():
-        raw = ti.xcom_pull(task_ids=task_id.task_id)
+    for task_instance in ti.get_dagrun(session=None).get_task_instances():
+        raw = ti.xcom_pull(task_ids=task_instance.task_id)
         if not raw or not isinstance(raw, dict):
             continue
         
