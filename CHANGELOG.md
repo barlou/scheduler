@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 
 ---
+## [scheduler-v2.0.3] - 2026-09-22
+
+## scheduler v2.0.3
+
+> **Bump type:** Patch - bug fix
+> **Previous version:** scheduler-v2.0.2
+
+### Fixes
+- fix: corrected tests ([`a75b69e`](../../commit/a75b69e)) - Louis Barillon
+
+
+---
+---
 ## [scheduler-v2.0.2] - 2026-09-22
 
 ## scheduler v2.0.2
