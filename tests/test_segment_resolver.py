@@ -56,6 +56,7 @@ def _cloud(
     return AirflowJobConfig(
         airflow_id="pipeline",
         dag_id="pipeline",
+        position= 1,
         schedule=schedule,
         execution=ExecutionConfig(mode="cloud", server=_server(force_terminate, instance_type)),
         job=JobConfig(module=module, entry_point="src/main.py", config_path="cfg.json"),
@@ -227,13 +228,13 @@ class TestResolveSegments:
         """If two modules share the exact same ServerConfig object they form one segment."""
         shared_server = _server()
         cfg1 = AirflowJobConfig(
-            airflow_id="p", dag_id="p", schedule="0 1 * * *",
+            airflow_id="p", dag_id="p", schedule="0 1 * * *", position=1,
             execution=ExecutionConfig(mode="cloud", server=shared_server),
             job=JobConfig(module="m1", entry_point="e", config_path="c"),
             source_path=Path("/fake"),
         )
         cfg2 = AirflowJobConfig(
-            airflow_id="p", dag_id="p", schedule="0 2 * * *",
+            airflow_id="p", dag_id="p", schedule="0 2 * * *", position=2,
             execution=ExecutionConfig(mode="cloud", server=shared_server),
             job=JobConfig(module="m2", entry_point="e", config_path="c"),
             source_path=Path("/fake"),
@@ -311,13 +312,13 @@ class TestResolveSegments:
         server_a = _server(force_terminate=True, instance_type="t3.large")
         server_b = _server(force_terminate=False, instance_type="g4dn.xlarge")
         cfg_a = AirflowJobConfig(
-            airflow_id="p", dag_id="p", schedule="0 1 * * *",
+            airflow_id="p", dag_id="p", schedule="0 1 * * *", position=1,
             execution=ExecutionConfig(mode="cloud", server=server_a),
             job=JobConfig(module="m1", entry_point="e", config_path="c"),
             source_path=Path("/fake"),
         )
         cfg_b = AirflowJobConfig(
-            airflow_id="p", dag_id="p", schedule="0 2 * * *",
+            airflow_id="p", dag_id="p", schedule="0 2 * * *", position=2,
             execution=ExecutionConfig(mode="cloud", server=server_b),
             job=JobConfig(module="m2", entry_point="e", config_path="c"),
             source_path=Path("/fake"),
