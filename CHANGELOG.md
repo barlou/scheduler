@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 
 ---
+## [scheduler-v2.0.5] - 2026-09-23
+
+## scheduler v2.0.5
+
+> **Bump type:** Patch - bug fix
+> **Previous version:** scheduler-v2.0.4
+
+### Fixes
+- fix: corrected tests ([`6ef9635`](../../commit/6ef9635)) - Louis Barillon
+
+### Other
+- Stop unit test for important functional test to validate ([`e9b89c0`](../../commit/e9b89c0)) - Louis Barillon
+
+
+---
+---
 ## [scheduler-v2.0.4] - 2026-09-22
 
 ## scheduler v2.0.4
