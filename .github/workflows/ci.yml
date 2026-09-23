@@ -91,7 +91,7 @@ jobs:
           # Tests in pending for the moment
           # python3 -m framework.segment_resolver
           if [ -d "tests" ]; then
-            pytest tests/ -v -tb=short
+            pytest tests/ 
           else
             echo "No tests/ directory yet -skipping pytest"
           fi
