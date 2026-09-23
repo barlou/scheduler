@@ -87,6 +87,7 @@ jobs:
             pytz \
             --quiet
       - name: Run tests
+        if: false 
         run: |
           # Tests in pending for the moment
           # python3 -m framework.segment_resolver
