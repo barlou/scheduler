@@ -301,15 +301,19 @@ def load_job_config(config_path: Path) -> AirflowJobConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"airflow_job.yml not found: {config_path}")
     
-    raw = config_path.read_text(encoding="utf-8")
+    raw = config_path.read_text(encoding="utf-8")    
     
     # Resolve {{ PLACEHOLDERS }} before parsing YAML
     raw = _resolve_placeholders(raw)
     
-    cfg = yaml.safe_load(raw)
+    docs = [d for d in yaml.safe_load_all(raw) if d is not None]
     
-    if not isinstance(cfg, dict):
+    if not docs:
         raise ValueError(f"{config_path}: file is empty or not valid YAML")
+    
+    return [_parse_single_doc(doc, config_path) for doc in docs]
+
+def _parse_single_doc(cfg: dict, config_path: Path) -> AirflowJobConfig:
     
     _validate(cfg, config_path)
     
@@ -400,18 +404,23 @@ def scan_job_configs(
     
     for config_path in sorted(deployments_base.glob(pattern)):
         try:
-            cfg = load_job_config(config_path)
             
-            if not cfg.enabled:
-                print(f"[SKIP] {config_path} - disabled")
-                continue 
+            job_list = load_job_config(config_path)
             
-            if airflow_id is not None and cfg.airflow_id != airflow_id:
-                continue
-            
-            configs.append(cfg)
-            print(f"[OK] loaded: {cfg.dag_id} ({cfg.job.module}) position={cfg.pipeline.position} - {cfg.execution.mode}")
-        
+            for cfg in job_list:
+                if not cfg.enabled:
+                    print(f"[SKIP] {config_path} ({cfg.job.module}) - disabled")
+                    continue 
+                    
+                if airflow_id is not None and cfg.airflow_id != airflow_id:
+                    continue
+                
+                configs.append(cfg)
+                print(
+                    f"[OK] loaded: {cfg.dag_id} ({cfg.job.module}) "
+                    f"position={cfg.pipeline.position} - {cfg.execution.mode}"
+                )
+
         except FileNotFoundError as e:
             print(f"[ERROR] {e}")
             
