@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable
 
+from pathlib import Path
+
 from airflow import DAG
 from airflow.models import TaskInstance 
 from airflow.operators.python import PythonOperator
@@ -104,7 +106,10 @@ class BaseExecutor(ABC):
         Airflow requires task IDs to be unique within a DAG. Using module name guarantee
         uniqueness since each module appears exactly once per pipeline.
         """
-        base = step.job.module.lower().replace("-", "_")
+        base = step.job.module.lower().replace("-", "_") 
+        entry_stem = Path(step.job.entry_point).stem.lower().replace("-", "_")
+        if entry_stem not in ("main", "__main__"):
+            base = f"{base}_{entry_stem}"
         return f"{base}__{suffix}" if suffix else base
     
     def _make_python_task(
