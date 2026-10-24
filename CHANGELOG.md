@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 
 ---
+## [scheduler-v2.1.1] - 2026-10-24
+
+## scheduler v2.1.1
+
+> **Bump type:** Patch - bug fix
+> **Previous version:** scheduler-v2.1.0
+
+### Fixes
+- fix: Airflow base_excutor to handle many script on a same src/ project ([`032924d`](../../commit/032924d)) - Louis Barillon
+
+
+---
+---
 ## [scheduler-v2.1.0] - 2026-10-21
 
 ## scheduler v2.1.0
