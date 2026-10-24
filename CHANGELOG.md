@@ -3,6 +3,22 @@
 All notable changes to this project are documented in this file.
 
 ---
+## [scheduler-v2.1.0] - 2026-10-21
+
+## scheduler v2.1.0
+
+> **Bump type:** Minor - new feature
+> **Previous version:** scheduler-v2.0.6
+
+### Features
+- feat: allow many schedule job in a same airflow_job.yml file ([`7bd201b`](../../commit/7bd201b)) - Louis Barillon
+
+### Fixes
+- fix: ci job for release issue ([`01d04a1`](../../commit/01d04a1)) - Louis Barillon
+
+
+---
+---
 ## [scheduler-v2.0.6] - 2026-09-23
 
 ## scheduler v2.0.6
